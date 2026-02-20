@@ -397,8 +397,13 @@
     margin-bottom: 1rem;
   }
 
-  .field-row .field {
+  .field-row .field,
+  .field-row .tag-field {
     flex: 1;
+    margin-bottom: 0;
+  }
+
+  .field-row .tag-field .field {
     margin-bottom: 0;
   }
 

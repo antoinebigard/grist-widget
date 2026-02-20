@@ -86,6 +86,10 @@ window.addEventListener('load', async (event) => {
                     {description:lookup_details, columnId:'REFERENCE_PROJET', type:'lookup'}),
             WidgetSDK.newItem('types', '', 'Type', 'List of task types available.', 'Cards options', 
                     {description:lookup_details, columnId:'TYPE', type:'lookup'}),
+            WidgetSDK.newItem('tagsByType', null, 'Tags by Type', 'Define visible tag columns for each type.', 'Cards options', 
+                    {columnId:'TYPE', template:[
+                        {id:'tags', title:'Visible tags', subtitle:'Semicolon-separated list of tag column names to show for this type. Leave empty to show all.', type:'longstring'}
+                    ]}),
             WidgetSDK.newItem('incharge', '', 'In charge', 'List of people that can be in charge of the task.', 'Cards options', 
                     {description:lookup_details, columnId:'RESPONSABLE', type:'lookup'}),
             WidgetSDK.newItem('cardcolor', '', 'Card color', 'List of color available for card background.', 'Cards options', 
@@ -343,6 +347,58 @@ async function updateTagsList() {
     }
 }
 
+/** Resolve the tagsByType entry for a given type across SDK formats */
+function getTagsByTypeEntry(type) {
+    const tbt = W.opt?.tagsByType;
+    if (!tbt || !type) return null;
+    if (Array.isArray(tbt)) {
+        const byName = tbt.find(e =>
+            e?.id === type || e?.type === type || e?.TYPE === type || e?.label === type || e?.name === type
+        );
+        if (byName) return byName;
+        const typesList = W.valuesList?.types || [];
+        const typeIndex = typesList.indexOf(type);
+        return typeIndex >= 0 ? tbt[typeIndex] : null;
+    }
+    if (typeof tbt === 'object') {
+        if (tbt[type]) return tbt[type];
+        const arr = tbt.values || tbt.list || tbt.items || tbt.data;
+        if (Array.isArray(arr)) {
+            return arr.find(e =>
+                e?.id === type || e?.type === type || e?.TYPE === type || e?.label === type || e?.name === type
+            ) || null;
+        }
+    }
+    return null;
+}
+
+/** Return a Set of TAGS indexes visible for a given type (or null for all) */
+function getVisibleTagIndexes(type) {
+    if (!W.map?.TAGS || !W.opt?.tagsByType || !type) return null;
+    const entry = getTagsByTypeEntry(type);
+    const raw = typeof entry?.tags === 'string' ? entry.tags.trim() : '';
+    if (!raw || raw === '*') return null;
+    const names = raw.split(';').map(s => s.trim()).filter(Boolean);
+    if (names.length === 0) return null;
+    const visible = new Set();
+    W.map.TAGS.forEach((colId, idx) => {
+        if (names.includes(colId)) visible.add(idx);
+    });
+    return visible.size > 0 ? visible : null;
+}
+
+/** Apply tag visibility in the popup according to the given type */
+function applyTagVisibility(type) {
+    const tagFields = document.querySelectorAll('.tag-field');
+    if (!tagFields.length) return;
+    const visible = getVisibleTagIndexes(type);
+    tagFields.forEach(el => {
+        const idx = Number(el.dataset.tagIndex);
+        const show = !visible || visible.has(idx);
+        el.style.display = show ? '' : 'none';
+    });
+}
+
 /* Création d'une carte TODO */
 function creerCarteTodo(todo) { 
     const carte = document.createElement('div');
@@ -364,15 +420,20 @@ function creerCarteTodo(todo) {
     const responsable = todo.RESPONSABLE || '';
     const projetRef = todo.REFERENCE_PROJET;
     const tags = todo.TAGS || [];
+    const visibleTags = getVisibleTagIndexes(type);
 
     let taglist= '';
-    tags.forEach(t => taglist += t?`<div class="more-tag">${t}</div>`:'');
+    tags.forEach((t, i) => {
+        if (!t) return;
+        if (visibleTags && !visibleTags.has(i)) return;
+        taglist += `<div class="more-tag">${t}</div>`;
+    });
     const infoColonne = W.getValueListOption('columns', todo.STATUT); //.find((colonne) => {return colonne.id === todo.STATUT});
 
     carte.innerHTML = `
         ${projetRef && projetRef.length > 0 ? `<div class="projet-ref truncate">#${projetRef}</div>` : ''}
         ${type ? `<div class="type-tag truncate">${type}</div>` : (projetRef && projetRef.length > 0 ? '<div>&nbsp;</div>':'')}
-        ${tags.length > 0 ? `<div>${taglist}</div>`:''}
+        ${taglist ? `<div>${taglist}</div>`:''}
         <div class="description">${description}</div>
         ${deadline ? `<div class="deadline${todo.DEADLINE < Date.now() ? ' late':''} truncate">📅 ${deadline}</div>` : (responsable ? '<div>&nbsp;</div>':'')}
         ${responsable ? `<div class="responsable-badge truncate">${responsable}</div>` : ''}
@@ -503,7 +564,7 @@ function togglePopupTodo(todo) {
     }
     if (count % 2 === 0) form += `</div><div class="field-row">`;
     if (W.map.TYPE) {
-        form += insererChamp(todo.id, todo.TYPE, W.valuesList.types, W.map.TYPE, 'TYPE', W.col.TYPE.getIsFormula());
+        form += insererChamp(todo.id, todo.TYPE, W.valuesList.types, W.map.TYPE, 'TYPE', W.col.TYPE.getIsFormula(), 'applyTagVisibility(this.value)');
         count += 1; 
     }
     if (count % 2 === 0) form += `</div><div class="field-row">`;
@@ -514,7 +575,9 @@ function togglePopupTodo(todo) {
     if (count % 2 === 0) form += `</div><div class="field-row">`;
     if (W.map.TAGS) {
         W.map.TAGS.forEach((t, i) => {
+            form += `<div class="tag-field" data-tag-index="${i}">`;
             form += insererChamp(todo.id, todo.TAGS[i], TAGSLIST[i], t, t, W.col.TAGS[i].getIsFormula());
+            form += `</div>`;
             count += 1;
             if (count % 2 === 0) form += `</div><div class="field-row">`;
         });
@@ -559,6 +622,7 @@ function togglePopupTodo(todo) {
         `;
     }
     content.innerHTML = form;
+    applyTagVisibility(todo.TYPE);
 
     // Initialisation des champs auto-expandables
     setTimeout(() => {
@@ -573,14 +637,15 @@ function togglePopupTodo(todo) {
 }
 
 /** Insert a field in the todo form as text or a dropdown */
-function insererChamp(id, value, list, title, col, disable) {
+function insererChamp(id, value, list, title, col, disable, extraOnChange) {
     let form='';
+    const extra = extraOnChange ? `; ${extraOnChange}` : '';
     if (list?.length > 0) {
         if( list.length < 10) {
             form += `
                 <div class="field">
                     <label class="field-label">${title}</label>
-                    <select class="field-select" onchange="mettreAJourChamp(${id}, '${col}', this.value, event)">
+                    <select class="field-select" onchange="mettreAJourChamp(${id}, '${col}', this.value, event)${extra}">
                     <option value="" ${disable?"disabled":""}></option>`;
             list.forEach(element => {
                 form += `<option value="${element}" ${value === element ? 'selected' : ''}>${element}</option>`;  
@@ -592,7 +657,7 @@ function insererChamp(id, value, list, title, col, disable) {
             form += `
                 <div class="field">
                     <label class="field-label">${title}</label>
-                    <input type="text" list="list-${col}" class="field-select" onchange="mettreAJourChamp(${id}, '${col}', this.value, event)" ${disable?"disabled":""}/>
+                    <input type="text" list="list-${col}" class="field-select" onchange="mettreAJourChamp(${id}, '${col}', this.value, event)${extra}" ${disable?"disabled":""}/>
                     <datalist id="list-${col}">`;
             list.forEach(element => {
                 form += `<option value="${element}" ${value === element ? 'selected' : ''}>${element}</option>`;  
@@ -606,7 +671,7 @@ function insererChamp(id, value, list, title, col, disable) {
             <div class="field">
                 <label class="field-label">${title}</label>
                 <input type="text" class="field-input" value="${value || ''}" 
-                    onchange="mettreAJourChamp(${id}, '${col}', this.value, event)" ${disable?"disabled":""}>
+                    onchange="mettreAJourChamp(${id}, '${col}', this.value, event)${extra}" ${disable?"disabled":""}>
             </div>
         `;
     }
