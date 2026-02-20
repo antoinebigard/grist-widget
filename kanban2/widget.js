@@ -393,6 +393,10 @@ function getVisibleTagIndexes(type) {
     const entry = getTagsByTypeEntry(type);
     const raw = typeof entry?.tags === 'string' ? entry.tags.trim() : '';
     if (!raw || raw === '*') return null;
+    const rawLower = raw.toLowerCase();
+    if (rawLower === 'none' || rawLower === '(none)' || rawLower === 'aucun' || rawLower === 'vide' || rawLower === 'empty') {
+        return new Set();
+    }
     const names = raw.split(';').map(s => s.trim()).filter(Boolean);
     if (names.length === 0) return null;
     const visible = new Set();
