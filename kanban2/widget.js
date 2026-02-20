@@ -20,6 +20,7 @@ const BACKCOLOR = '#DCDCDC';
 const TEXTCOLOR = '#000000';
 let RECS;
 let TAGSLIST = [];
+let TYPESLIST = [];
 
 // ========== INITILIZATION ==========
 /** Asynchonous load of the widget */
@@ -284,6 +285,7 @@ async function afficherKanban(recs) {
 async function optionsChanged(opts) {    
     /** If you don't need mapping to be done before managing options change, you can remove this line */
     await W.isMapped();
+    await updateTypesList();
 
     /** Place here the code that update your widget each time option are changed */
     afficherKanban(RECS);
@@ -345,6 +347,20 @@ async function updateTagsList() {
         });
         TAGSLIST = await Promise.all(TAGSLIST);
     }
+
+    await updateTypesList();
+}
+
+/** Update list of TYPE choices (used for tagsByType mapping) */
+async function updateTypesList() {
+    TYPESLIST = W.valuesList?.types || [];
+    if (!TYPESLIST || TYPESLIST.length === 0) {
+        try {
+            if (W.col?.TYPE) TYPESLIST = await W.col.TYPE.getChoices();
+        } catch (e) {
+            TYPESLIST = [];
+        }
+    }
 }
 
 /** Resolve the tagsByType entry for a given type across SDK formats */
@@ -356,8 +372,7 @@ function getTagsByTypeEntry(type) {
             e?.id === type || e?.type === type || e?.TYPE === type || e?.label === type || e?.name === type
         );
         if (byName) return byName;
-        const typesList = W.valuesList?.types || [];
-        const typeIndex = typesList.indexOf(type);
+        const typeIndex = TYPESLIST.indexOf(type);
         return typeIndex >= 0 ? tbt[typeIndex] : null;
     }
     if (typeof tbt === 'object') {
