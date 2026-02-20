@@ -20,6 +20,18 @@ const BACKCOLOR = '#DCDCDC';
 const TEXTCOLOR = '#000000';
 let RECS;
 let TAGSLIST = [];
+let CARD_FIELDS_BY_TYPE = new Map();
+let CARD_FIELDS_DEFAULT = null;
+const DEFAULT_CARD_FIELDS = new Set([
+    'reference',
+    'type',
+    'tags',
+    'description',
+    'deadline',
+    'responsable',
+    'notes',
+    'status'
+]);
 
 // ========== INITILIZATION ==========
 /** Asynchonous load of the widget */
@@ -86,6 +98,13 @@ window.addEventListener('load', async (event) => {
                     {description:lookup_details, columnId:'REFERENCE_PROJET', type:'lookup'}),
             WidgetSDK.newItem('types', '', 'Type', 'List of task types available.', 'Cards options', 
                     {description:lookup_details, columnId:'TYPE', type:'lookup'}),
+            WidgetSDK.newItem('card_fields_by_type', [], 'Card fields by type', 'Define which fields are shown on cards for each type.', 'Cards options',
+                {type:'templateform', description:'Fields tokens: reference, type, tags, description, deadline, responsable, notes, status. Use comma or semicolon list.',
+                template:[
+                    WidgetSDK.newItem('type', '', 'Type', 'Type value to match (case-insensitive)'),
+                    {id:'fields', default:'', title:'Fields', subtitle:'Comma/semicolon list of fields to show', type:'longstring'}
+                ]}
+            ),
             WidgetSDK.newItem('incharge', '', 'In charge', 'List of people that can be in charge of the task.', 'Cards options', 
                     {description:lookup_details, columnId:'RESPONSABLE', type:'lookup'}),
             WidgetSDK.newItem('cardcolor', '', 'Card color', 'List of color available for card background.', 'Cards options', 
@@ -282,6 +301,7 @@ async function optionsChanged(opts) {
     await W.isMapped();
 
     /** Place here the code that update your widget each time option are changed */
+    rebuildCardFieldsByType();
     afficherKanban(RECS);
 }
 
@@ -343,6 +363,73 @@ async function updateTagsList() {
     }
 }
 
+/** Build field visibility by type based on config option */
+function rebuildCardFieldsByType() {
+    const entries = Array.isArray(W.opt.card_fields_by_type) ? W.opt.card_fields_by_type : [];
+    const map = new Map();
+    let defaultSet = null;
+
+    entries.forEach((item) => {
+        if (!item) return;
+        const rawType = (item.type ?? item.type_value ?? item.id ?? '').toString().trim();
+        if (!rawType) return;
+
+        const key = normalizeTypeValue(rawType);
+        const fields = parseFieldList(item.fields ?? item.field ?? item.field_list ?? '');
+        if (key === '__default__') defaultSet = fields;
+        else map.set(key, fields);
+    });
+
+    CARD_FIELDS_BY_TYPE = map;
+    CARD_FIELDS_DEFAULT = defaultSet;
+}
+
+function normalizeTypeValue(value) {
+    const v = (value ?? '').toString().trim().toLowerCase();
+    if (!v || v === '*' || v === 'default') return '__default__';
+    return v;
+}
+
+function parseFieldList(value) {
+    const raw = (value ?? '').toString();
+    const parts = raw.split(/[;,|\n]+/);
+    const set = new Set();
+    parts.forEach((p) => {
+        const token = normalizeFieldToken(p);
+        if (token) set.add(token);
+    });
+    return set;
+}
+
+function normalizeFieldToken(token) {
+    const t = (token ?? '').toString().trim().toLowerCase();
+    if (!t) return '';
+    if (['ref', 'reference', 'project', 'projet'].includes(t)) return 'reference';
+    if (['type'].includes(t)) return 'type';
+    if (['tag', 'tags'].includes(t)) return 'tags';
+    if (['desc', 'description', 'task'].includes(t)) return 'description';
+    if (['deadline', 'date', 'due'].includes(t)) return 'deadline';
+    if (['responsable', 'assignee', 'owner', 'incharge'].includes(t)) return 'responsable';
+    if (['notes', 'note', 'comment', 'comments'].includes(t)) return 'notes';
+    if (['status', 'done', 'stamp'].includes(t)) return 'status';
+    return '';
+}
+
+function getCardFieldVisibility(typeValue) {
+    const key = normalizeTypeValue(typeValue);
+    const set = CARD_FIELDS_BY_TYPE.get(key) ?? CARD_FIELDS_DEFAULT ?? DEFAULT_CARD_FIELDS;
+    return {
+        reference: set.has('reference'),
+        type: set.has('type'),
+        tags: set.has('tags'),
+        description: set.has('description'),
+        deadline: set.has('deadline'),
+        responsable: set.has('responsable'),
+        notes: set.has('notes'),
+        status: set.has('status')
+    };
+}
+
 /* Création d'une carte TODO */
 function creerCarteTodo(todo) { 
     const carte = document.createElement('div');
@@ -368,15 +455,16 @@ function creerCarteTodo(todo) {
     let taglist= '';
     tags.forEach(t => taglist += t?`<div class="more-tag">${t}</div>`:'');
     const infoColonne = W.getValueListOption('columns', todo.STATUT); //.find((colonne) => {return colonne.id === todo.STATUT});
+    const vis = getCardFieldVisibility(type);
 
     carte.innerHTML = `
-        ${projetRef && projetRef.length > 0 ? `<div class="projet-ref truncate">#${projetRef}</div>` : ''}
-        ${type ? `<div class="type-tag truncate">${type}</div>` : (projetRef && projetRef.length > 0 ? '<div>&nbsp;</div>':'')}
-        ${tags.length > 0 ? `<div>${taglist}</div>`:''}
-        <div class="description">${description}</div>
-        ${deadline ? `<div class="deadline${todo.DEADLINE < Date.now() ? ' late':''} truncate">📅 ${deadline}</div>` : (responsable ? '<div>&nbsp;</div>':'')}
-        ${responsable ? `<div class="responsable-badge truncate">${responsable}</div>` : ''}
-        ${infoColonne?.isdone ? `<div class="tampon-termine" style="color: ${W.col.STATUT.getColor(todo.STATUT) ?? BACKCOLOR};">${todo.STATUT}</div>` : ''}      
+        ${(vis.reference && projetRef && projetRef.length > 0) ? `<div class="projet-ref truncate">#${projetRef}</div>` : ''}
+        ${(vis.type && type) ? `<div class="type-tag truncate">${type}</div>` : ''}
+        ${(vis.tags && tags.length > 0) ? `<div>${taglist}</div>`:''}
+        ${vis.description ? `<div class="description">${description}</div>` : ''}
+        ${(vis.deadline && deadline) ? `<div class="deadline${todo.DEADLINE < Date.now() ? ' late':''} truncate">📅 ${deadline}</div>` : ''}
+        ${(vis.responsable && responsable) ? `<div class="responsable-badge truncate">${responsable}</div>` : ''}
+        ${(vis.status && infoColonne?.isdone) ? `<div class="tampon-termine" style="color: ${W.col.STATUT.getColor(todo.STATUT) ?? BACKCOLOR};">${todo.STATUT}</div>` : ''}      
     `;
   
     carte.addEventListener('click', () => {
@@ -460,6 +548,7 @@ function togglePopupTodo(todo) {
     const carteActive = document.querySelector('.carte.active');
     const carteCliquee = document.querySelector(`[data-todo-id="${todo.id}"]`);
     const infoColonne = W.getValueListOption('columns', todo.STATUT); //.find((colonne) => {return colonne.id === todo.STATUT});
+    const vis = getCardFieldVisibility(todo.TYPE || '');
 
     if (W.opt.readonly) { 
         fermerPopup();
@@ -486,7 +575,7 @@ function togglePopupTodo(todo) {
 
     let count = 1;
     let form = '<div class="field-row">';
-    if (W.map.DEADLINE) {
+    if (W.map.DEADLINE && vis.deadline) {
         form += `
             <div class="field">
             <label class="field-label">${W.map.DEADLINE}</label>
@@ -497,22 +586,22 @@ function togglePopupTodo(todo) {
         `;
     }    
 
-    if (W.map.REFERENCE_PROJET) {
+    if (W.map.REFERENCE_PROJET && vis.reference) {
         form += insererChamp(todo.id, todo.REFERENCE_PROJET, W.valuesList.ref, W.map.REFERENCE_PROJET, 'REFERENCE_PROJET', W.col.REFERENCE_PROJET.getIsFormula()); 
         count += 1;
     }
     if (count % 2 === 0) form += `</div><div class="field-row">`;
-    if (W.map.TYPE) {
+    if (W.map.TYPE && vis.type) {
         form += insererChamp(todo.id, todo.TYPE, W.valuesList.types, W.map.TYPE, 'TYPE', W.col.TYPE.getIsFormula());
         count += 1; 
     }
     if (count % 2 === 0) form += `</div><div class="field-row">`;
-    if (W.map.RESPONSABLE) {
+    if (W.map.RESPONSABLE && vis.responsable) {
         form += insererChamp(todo.id, todo.RESPONSABLE, W.valuesList.incharge, W.map.RESPONSABLE, 'RESPONSABLE', W.col.RESPONSABLE.getIsFormula());
         count += 1;   
     }
     if (count % 2 === 0) form += `</div><div class="field-row">`;
-    if (W.map.TAGS) {
+    if (W.map.TAGS && vis.tags) {
         W.map.TAGS.forEach((t, i) => {
             form += insererChamp(todo.id, todo.TAGS[i], TAGSLIST[i], t, t, W.col.TAGS[i].getIsFormula());
             count += 1;
@@ -524,7 +613,9 @@ function togglePopupTodo(todo) {
         count += 1;   
     }
 
-    form += `</div>
+    form += `</div>`;
+    if (W.map.DESCRIPTION && vis.description) {
+        form += `
         <div class="field">
             <label class="field-label">${W.map.DESCRIPTION}</label>
             <textarea class="field-textarea auto-expand" 
@@ -532,7 +623,8 @@ function togglePopupTodo(todo) {
                     oninput="this.style.height = ''; this.style.height = this.scrollHeight + 'px'">${todo.DESCRIPTION || ''}</textarea>
         </div>
     `;
-    if (W.map.NOTES) {
+    }
+    if (W.map.NOTES && vis.notes) {
         form += `<div class="field">
             <label class="field-label">${W.map.NOTES}</label>
             <textarea class="field-textarea auto-expand" 
