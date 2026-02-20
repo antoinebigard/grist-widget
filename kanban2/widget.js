@@ -387,30 +387,59 @@ function getTagsByTypeEntry(type) {
     return null;
 }
 
-/** Return a Set of TAGS indexes visible for a given type (or null for all) */
-function getVisibleTagIndexes(type) {
-    if (!W.map?.TAGS || !W.opt?.tagsByType || !type) return null;
+/** Return visible TAGS indexes for a given type (card + popup). null = show all */
+function getVisibleTagSets(type) {
+    if (!W.map?.TAGS || !W.opt?.tagsByType || !type) return {card: null, popup: null};
     const entry = getTagsByTypeEntry(type);
     const raw = typeof entry?.tags === 'string' ? entry.tags.trim() : '';
-    if (!raw || raw === '*') return null;
+    if (!raw || raw === '*') return {card: null, popup: null};
     const rawLower = raw.toLowerCase();
     if (rawLower === 'none' || rawLower === '(none)' || rawLower === 'aucun' || rawLower === 'vide' || rawLower === 'empty') {
-        return new Set();
+        return {card: new Set(), popup: new Set()};
     }
-    const names = raw.split(';').map(s => s.trim()).filter(Boolean);
-    if (names.length === 0) return null;
-    const visible = new Set();
-    W.map.TAGS.forEach((colId, idx) => {
-        if (names.includes(colId)) visible.add(idx);
+    const tokens = raw.split(';').map(s => s.trim()).filter(Boolean);
+    if (tokens.length === 0) return {card: null, popup: null};
+
+    const card = new Set();
+    const popup = new Set();
+    const toIndex = new Map();
+    W.map.TAGS.forEach((colId, idx) => toIndex.set(colId, idx));
+
+    tokens.forEach(tok => {
+        const parts = tok.split(':').map(s => s.trim()).filter(Boolean);
+        const name = parts[0];
+        const scope = (parts[1] || '').toLowerCase();
+        if (!name) return;
+        const idx = toIndex.get(name);
+        if (idx === undefined) return;
+
+        if (!scope) {
+            card.add(idx);
+            popup.add(idx);
+            return;
+        }
+        if (scope === 'popup' || scope === 'popup_only') {
+            popup.add(idx);
+            return;
+        }
+        if (scope === 'card' || scope === 'card_only') {
+            card.add(idx);
+            return;
+        }
+        if (scope === 'both' || scope === 'all') {
+            card.add(idx);
+            popup.add(idx);
+        }
     });
-    return visible.size > 0 ? visible : null;
+
+    return {card, popup};
 }
 
 /** Apply tag visibility in the popup according to the given type */
 function applyTagVisibility(type) {
     const tagFields = document.querySelectorAll('.tag-field');
     if (!tagFields.length) return;
-    const visible = getVisibleTagIndexes(type);
+    const visible = getVisibleTagSets(type).popup;
     tagFields.forEach(el => {
         const idx = Number(el.dataset.tagIndex);
         const show = !visible || visible.has(idx);
@@ -439,7 +468,7 @@ function creerCarteTodo(todo) {
     const responsable = todo.RESPONSABLE || '';
     const projetRef = todo.REFERENCE_PROJET;
     const tags = todo.TAGS || [];
-    const visibleTags = getVisibleTagIndexes(type);
+    const visibleTags = getVisibleTagSets(type).card;
 
     let taglist= '';
     tags.forEach((t, i) => {
