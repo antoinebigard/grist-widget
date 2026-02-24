@@ -139,6 +139,7 @@ window.addEventListener('load', async (event) => {
             {name:'DESCRIPTION', title:'Task', description:'Task name', type:'Any'}, 
             {name:'DESCRIPTION_DISPLAY', title:'Task Display', description:'Displayed card content (e.g. a formula column adding html)', type:'Any', optional:true}, 
             {name:'DEADLINE', title:'Deadline', description:'Can also be use as priority', type:'Date', optional:true},             
+            {name:'PRIORITE', title:'Priority', description:'Priority from 1 to 3', type:'Int,Numeric', optional:true},
             {name:'REFERENCE_PROJET', title:'Reference', description:'Reference associated with the task', type:'Any', optional:true},
             {name:'TYPE', title:'Type', description:'Type associated with the task', type:'Any', optional:true},              
             {name:'RESPONSABLE', title:'In charge', description:'Who is in charge', type:'Any', optional:true}, 
@@ -455,6 +456,7 @@ function creerCarteTodo(todo) {
     carte.setAttribute('data-todo-id', todo.id);
     carte.setAttribute('data-last-update', todo.DERNIERE_MISE_A_JOUR || '');
     carte.setAttribute('data-deadline', todo.DEADLINE || '');
+    carte.setAttribute('data-priority', todo.PRIORITE ?? '');
     if (todo.COULEUR) {
         if (W.col.COULEUR.type === 'Choice')
             if (W.col.COULEUR.getColor(todo.COULEUR)) carte.setAttribute('style', `background-color: ${W.col.COULEUR.getColor(todo.COULEUR)}`);
@@ -465,6 +467,8 @@ function creerCarteTodo(todo) {
     const type = todo.TYPE || '';
     const description = todo.DESCRIPTION_DISPLAY || todo.DESCRIPTION || T('No description');
     const deadline = todo.DEADLINE ? formatDate(todo.DEADLINE) : '';
+    const priorityNum = Number(todo.PRIORITE);
+    const priority = (Number.isInteger(priorityNum) && priorityNum >= 1 && priorityNum <= 3) ? priorityNum : null;
     const responsable = todo.RESPONSABLE || '';
     const projetRef = todo.REFERENCE_PROJET;
     const tags = todo.TAGS || [];
@@ -481,6 +485,7 @@ function creerCarteTodo(todo) {
     carte.innerHTML = `
         ${projetRef && projetRef.length > 0 ? `<div class="projet-ref truncate">#${projetRef}</div>` : ''}
         ${type ? `<div class="type-tag truncate">${type}</div>` : (projetRef && projetRef.length > 0 ? '<div>&nbsp;</div>':'')}
+        ${priority ? `<div class="priority-badge">P${priority}</div>` : ''}
         ${taglist ? `<div>${taglist}</div>`:''}
         <div class="description">${description}</div>
         ${deadline ? `<div class="deadline${todo.DEADLINE < Date.now() ? ' late':''} truncate">📅 ${deadline}</div>` : (responsable ? '<div>&nbsp;</div>':'')}
@@ -526,6 +531,16 @@ function trierTodo(conteneur) {
     const colonne = conteneur.dataset.isdone;
     
     cartes.sort((a, b) => {
+        const priorityA = getPriorityValue(a);
+        const priorityB = getPriorityValue(b);
+        if (priorityA !== null && priorityB !== null) {
+            if (priorityA !== priorityB) return priorityA - priorityB;
+        } else if (priorityA !== null && priorityB === null) {
+            return -1;
+        } else if (priorityA === null && priorityB !== null) {
+            return 1;
+        }
+
         let delta = 0;
         if (W.map.DEADLINE) {
             if (colonne) {
@@ -551,6 +566,14 @@ function trierTodo(conteneur) {
     });
     
     cartes.forEach(carte => conteneur.appendChild(carte));
+}
+
+function getPriorityValue(carte) {
+    const raw = carte.getAttribute('data-priority');
+    const value = Number(raw);
+    if (!Number.isInteger(value)) return null;
+    if (value < 1 || value > 3) return null;
+    return value;
 }
 
 /* Mise à jour des compteurs */
@@ -605,6 +628,11 @@ function togglePopupTodo(todo) {
             </div>
         `;
     }    
+    if (W.map.PRIORITE) {
+        const priorityValue = (todo.PRIORITE === null || todo.PRIORITE === undefined || todo.PRIORITE === '') ? '' : String(todo.PRIORITE);
+        form += insererChamp(todo.id, priorityValue, ['1','2','3'], W.map.PRIORITE, 'PRIORITE', W.col.PRIORITE.getIsFormula());
+        count += 1;
+    }
 
     if (W.map.REFERENCE_PROJET) {
         form += insererChamp(todo.id, todo.REFERENCE_PROJET, W.valuesList.ref, W.map.REFERENCE_PROJET, 'REFERENCE_PROJET', W.col.REFERENCE_PROJET.getIsFormula()); 
